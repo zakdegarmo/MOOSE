@@ -1,13 +1,10 @@
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { SceneCanvas } from './components/SceneCanvas';
 import { ControlPanel } from './components/ScreenManager';
 import { ChatHistory } from './components/ChatHistory';
-// FIX: Correct casing for icons import to resolve module ambiguity.
 import { ChatBubble } from './components/Icons.tsx';
 import { ContextMenu } from './components/ContextMenu';
 import type { PrimitiveType } from './types';
-
 
 // Define unified state structures for all scene objects
 export interface Transform {
@@ -72,9 +69,153 @@ export interface ChatMessage {
   text: string;
 }
 
+// Hardcoded initial data is used as the default fallback config.
+const initialScreens: ScreenState[] = [
+  {
+    id: 1,
+    isVisible: true,
+    position: [180, -85, 0],
+    rotation: [0, 1.5707963267948966 + Math.PI, 0],
+    scale: 1.6,
+  },
+  {
+    id: 2,
+    isVisible: true,
+    position: [127.27922061357857, -85, 127.27922061357857],
+    rotation: [0, 0.7853981633974483 + Math.PI, 0],
+    scale: 1.6,
+  },
+  {
+    id: 3,
+    isVisible: true,
+    position: [0, -85, 180],
+    rotation: [0, 0 + Math.PI, 0],
+    scale: 1.6,
+  },
+  {
+    id: 4,
+    isVisible: true,
+    position: [-127.27922061357856, -85, 127.27922061357857],
+    rotation: [0, -0.7853981633974483 + Math.PI, 0],
+    scale: 1.6,
+  },
+  {
+    id: 5,
+    isVisible: true,
+    position: [-180, -85, 0],
+    rotation: [0, -1.5707963267948966 + Math.PI, 0],
+    scale: 1.6,
+  },
+  {
+    id: 6,
+    isVisible: true,
+    position: [-127.27922061357857, -85, -127.27922061357856],
+    rotation: [0, -2.356194490192345 + Math.PI, 0],
+    scale: 1.6,
+  },
+  {
+    id: 7,
+    isVisible: true,
+    position: [0, -85, -180],
+    rotation: [0, -3.141592653589793 + Math.PI, 0],
+    scale: 1.6,
+  },
+  {
+    id: 8,
+    isVisible: true,
+    position: [127.27922061357856, -85, -127.27922061357857],
+    rotation: [0, -3.9269908169872414 + Math.PI, 0],
+    scale: 1.6,
+  },
+];
 
-// Default configuration to be used as a fallback.
-const defaultGeometryConfig: GeometryConfig = {
+const initialDoors: DoorState[] = [
+  {
+    id: 'ontology',
+    name: 'Ontology',
+    url: 'https://zakdegarmo.github.io/MyOntology/',
+    position: [220, -110, 0],
+    rotation: [0, 1.5707963267948966, 0],
+    scale: 1.4,
+  },
+  {
+    id: 'notepad',
+    name: 'Notepad',
+    url: 'https://zakdegarmo.github.io/ZaksNotepad/index.html',
+    position: [168.5542152642095, -110, 141.2820323027551],
+    rotation: [0, 0.8726646259971648, 0],
+    scale: 1.4,
+  },
+  {
+    id: 'file-explorer',
+    name: 'File Explorer',
+    url: 'https://3-d-file-explorer.vercel.app/',
+    position: [38.20423349051557, -110, 216.7957665094825],
+    rotation: [0, 0.17453292519943295, 0],
+    scale: 1.4,
+  },
+  {
+    id: 'hap',
+    name: 'Hap',
+    url: 'https://hyper-aether-pilgrim.vercel.app/',
+    position: [-110, -110, 190.5255866034633],
+    rotation: [0, -0.5235987755982988, 0],
+    scale: 1.4,
+  },
+  {
+    id: '3d-molecule-lab',
+    name: '3d Molecule Lab',
+    url: 'https://3d-molecule-lab.vercel.app/',
+    position: [-206.7957665094825, -110, 75.25423349051566],
+    rotation: [0, -1.2217304763960306, 0],
+    scale: 1.4,
+  },
+  {
+    id: 'data-vis',
+    name: 'Data Vis',
+    url: 'https://data-vis-eosin.vercel.app/',
+    position: [-206.79576650948253, -110, -75.25423349051552],
+    rotation: [0, -1.9198621771937625, 0],
+    scale: 1.4,
+  },
+  {
+    id: 'font-fun',
+    name: 'Font Fun',
+    url: 'https://3d-ttf.vercel.app/',
+    position: [-110, -110, -190.52558660346327],
+    rotation: [0, -2.6179938779914944, 0],
+    scale: 1.4,
+  },
+  {
+    id: 'IDE',
+    name: 'IDE',
+    url: 'https://my-os-3-d-ide.vercel.app/',
+    position: [38.2042334905154, -110, -216.79576650948253],
+    rotation: [0, -3.316125578789226, 0],
+    scale: 1.4,
+  },
+  {
+    id: 'web-dungeon homepage',
+    name: 'Web Dungeon Homepage',
+    url: 'https://web-dungeon.vercel.app/',
+    position: [168.5542152642094, -110, -141.28203230275518],
+    rotation: [0, -4.014257279586958, 0],
+    scale: 1.4,
+  },
+];
+
+const initialSceneObjects: SceneObjectState[] = [];
+
+const initialMooseBotState: MooseBotState = {
+    url: 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
+    dialogue: 'Hello! I am MOOSE-BOT. Please provide a Gemini API key to chat with me.',
+    activeAnimation: 'Idle',
+    position: [0, -125, 15],
+    rotation: [0, Math.PI, 0],
+    scale: 6,
+};
+
+const initialGeometryConfig: GeometryConfig = {
     sphere: { widthSegments: 64, heightSegments: 64 },
     box: { widthSegments: 1, heightSegments: 1, depthSegments: 1 },
     cylinder: { radialSegments: 64, heightSegments: 1 },
@@ -84,7 +225,7 @@ const defaultGeometryConfig: GeometryConfig = {
     dodecahedron: { detail: 1 },
 };
 
-const defaultRoomConfig: RoomConfig = {
+const initialRoomConfig: RoomConfig = {
     size: 250,
     shape: 'sphere',
     wallColor: '#444444',
@@ -94,18 +235,8 @@ const defaultRoomConfig: RoomConfig = {
     pointLightColor: '#ff8844',
     fogColor: '#101010',
     fogDensity: 50, // Mid-range density
-    geometryConfig: defaultGeometryConfig,
+    geometryConfig: initialGeometryConfig,
 };
-
-const defaultMooseBotState: MooseBotState = {
-    url: 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb',
-    dialogue: 'Hello! I am MOOSE-BOT. Please provide a Gemini API key to chat with me.',
-    activeAnimation: 'Idle',
-    position: [0, -125, 15],
-    rotation: [0, Math.PI, 0],
-    scale: 6,
-};
-
 
 const ALLOWED_IFRAME_ORIGINS = [
     'https://dewey-ai-knowledge-sorter.vercel.app',
@@ -122,20 +253,19 @@ const ALLOWED_IFRAME_ORIGINS = [
     window.location.origin // Allow self for local dev
 ];
 
-
 const App: React.FC = () => {
   const [key, setKey] = useState<number>(0);
   const [screens, setScreens] = useState<ScreenState[]>([]);
   const [doors, setDoors] = useState<DoorState[]>([]);
   const [sceneObjects, setSceneObjects] = useState<SceneObjectState[]>([]);
-  const [mooseBot, setMooseBot] = useState<MooseBotState>(defaultMooseBotState);
+  const [mooseBot, setMooseBot] = useState<MooseBotState>(initialMooseBotState);
   const [animationNames, setAnimationNames] = useState<string[]>([]);
-  const [roomConfig, setRoomConfig] = useState<RoomConfig>(defaultRoomConfig);
+  const [roomConfig, setRoomConfig] = useState<RoomConfig>(initialRoomConfig);
   const [isManagerVisible, setIsManagerVisible] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [isBotChatting, setIsBotChatting] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
-    { sender: 'bot', text: defaultMooseBotState.dialogue }
+    { sender: 'bot', text: initialMooseBotState.dialogue }
   ]);
   const [isChatVisible, setIsChatVisible] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -153,11 +283,11 @@ const App: React.FC = () => {
     if (config.room) {
         const loadedRoomConfig = config.room;
         const mergedGeometryConfig = {
-            ...defaultRoomConfig.geometryConfig,
+            ...initialRoomConfig.geometryConfig,
             ...(loadedRoomConfig.geometryConfig || {}),
         };
         const finalRoomConfig = {
-            ...defaultRoomConfig,
+            ...initialRoomConfig,
             ...loadedRoomConfig,
             geometryConfig: mergedGeometryConfig,
         };
@@ -165,7 +295,7 @@ const App: React.FC = () => {
     }
     setKey(prevKey => prevKey + 1); // Re-render canvas
     setIsManagerVisible(false); // Close panel after loading
-  }, []);
+  }, [initialRoomConfig]);
 
   // Load config from localStorage or fetch default on initial mount
   useEffect(() => {
@@ -177,12 +307,22 @@ const App: React.FC = () => {
                 handleLoadConfiguration(config);
             } else {
                 const response = await fetch('/nexus-config.json');
-                if (!response.ok) throw new Error('Failed to fetch default config');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch default config');
+                }
                 const defaultConfig = await response.json();
                 handleLoadConfiguration(defaultConfig);
             }
         } catch (error) {
             console.error("Failed to load configuration:", error);
+            // Fallback to hardcoded initial data if no file is found and no localStorage data exists
+            handleLoadConfiguration({
+                screens: initialScreens,
+                doors: initialDoors,
+                sceneObjects: initialSceneObjects,
+                mooseBot: initialMooseBotState,
+                room: initialRoomConfig
+            });
             localStorage.removeItem('moose-config'); // Clear potentially corrupted data
         }
     };
@@ -260,7 +400,7 @@ const App: React.FC = () => {
     return () => {
         window.removeEventListener('message', handleMessage);
     };
-  }, []); // Run only once
+  }, []);
 
   const handleApiKeyChange = (key: string) => {
     setApiKey(key);
@@ -311,11 +451,9 @@ const App: React.FC = () => {
             const errorText = await response.text();
             let errorMessage = `API Error: ${response.status} ${response.statusText}`;
             try {
-                // Try to parse as JSON, as the server might send a structured error
                 const errorJson = JSON.parse(errorText);
                 errorMessage = errorJson.message || errorMessage;
             } catch (e) {
-                // Not JSON, maybe it's the error message itself or an HTML page
                 if (errorText) {
                     errorMessage = errorText.substring(0, 200); // Truncate long HTML errors
                 }
