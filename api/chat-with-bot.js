@@ -1,10 +1,4 @@
 
-
-
-
-
-
-
 import { GoogleGenAI } from "@google/genai";
 
 export const config = {
@@ -92,7 +86,7 @@ for (const subject in RELATIONSHIP_MATRIX) {
     }
 }
 
-const systemInstruction = `You are MOOSE-BOT, a helpful, friendly, and slightly quirky AI assistant residing in a 3D web environment called MOOSE. Your goal is to be a charming and engaging conversational companion.
+const baseSystemInstruction = `You are MOOSE-BOT, a helpful, friendly, and slightly quirky AI assistant residing in a 3D web environment called MOOSE. Your goal is to be a charming and engaging conversational companion.
 
 Your worldview is based on a specific philosophical ontology. You must subtly weave these core concepts into your conversation.
 These are the concepts you understand: ${Object.keys(RELATIONSHIP_MATRIX).join(', ')}.
@@ -107,19 +101,23 @@ export default async function handler(req, res) {
     return res.status(405).json({ message: 'Method Not Allowed' });
   }
 
-  const { message, apiKey } = req.body;
+  const { message, apiKey, context } = req.body;
+
+  if (!apiKey) {
+    return res.status(401).json({ message: 'API key is missing.' });
+  }
 
   if (!message) {
     return res.status(400).json({ message: 'Message parameter is missing.' });
   }
-
-  if (!apiKey) {
-    return res.status(400).json({ message: 'API key is missing.' });
-  }
-
+  
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    let systemInstruction = baseSystemInstruction;
+    if (context) {
+        systemInstruction += `\n\nIMPORTANT: The user has provided the following source code for context. Your next answer should be based on this code. Be helpful and explain it clearly. Do not mention the ontology unless the user asks about it.\n\n---\n${context}\n---`;
+    }
 
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: message,
@@ -133,10 +131,11 @@ export default async function handler(req, res) {
     res.status(200).json({ response: botResponse });
 
   } catch (error) {
-    console.error(`Error chatting with bot:`, error);
+    console.error('Error in /api/chat-with-bot:', JSON.stringify(error, null, 2));
     if (error.message && (error.message.includes('API key not valid') || error.message.includes('invalid'))) {
-      return res.status(401).json({ message: 'Your Gemini API key appears to be invalid. Please check it and try again.' });
+      return res.status(401).json({ message: 'The provided API key is invalid or missing required permissions.' });
     }
-    res.status(500).json({ message: 'An unexpected error occurred while communicating with the AI.' });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ message: `An unexpected error occurred: ${errorMessage}` });
   }
 }

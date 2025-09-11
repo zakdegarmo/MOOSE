@@ -1,5 +1,4 @@
 
-
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useGLTF, useAnimations, Html } from '@react-three/drei';
@@ -7,7 +6,7 @@ import { useThree, useFrame } from '@react-three/fiber';
 import type { ThreeElements } from '@react-three/fiber';
 import type { MooseBotState } from '../App';
 
-// FIX: Manually extend JSX.IntrinsicElements to include React Three Fiber's elements.
+// Manually extend JSX.IntrinsicElements to include React Three Fiber's elements.
 // This is a workaround for environments where TypeScript's module augmentation may not be working correctly.
 declare global {
   namespace JSX {

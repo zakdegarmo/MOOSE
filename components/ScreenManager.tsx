@@ -1,9 +1,9 @@
 
-
-
-import React, { useState, useRef } from 'react';
-import { Eye, EyeOff } from './Icons';
-import type { ScreenState, DoorState, SceneObjectState, MooseBotState, RoomConfig, SceneObjectType } from '../App';
+import React, { useState, useRef, useEffect } from 'react';
+// FIX: Correct casing for icons import to resolve module ambiguity.
+import { Eye, EyeOff } from './Icons.tsx';
+import type { ScreenState, DoorState, SceneObjectState, MooseBotState, RoomConfig, SceneObjectType, GeometryConfig } from '../App';
+import type { PrimitiveType } from '../types';
 
 interface ControlPanelProps {
   screens: ScreenState[];
@@ -12,12 +12,26 @@ interface ControlPanelProps {
   mooseBot: MooseBotState;
   animationNames: string[];
   roomConfig: RoomConfig;
+  apiKey: string;
+  onApiKeyChange: (key: string) => void;
   onApply: (screens: ScreenState[], doors: DoorState[], sceneObjects: SceneObjectState[], mooseBot: MooseBotState, roomConfig: RoomConfig) => void;
   onLoadConfiguration: (config: any) => void;
+  onGenerateRoom: (prompt: string, part: string) => Promise<any>;
+  onCodeContextChange: (content: string, filePath: string) => void;
   onClose: () => void;
 }
 
-type Tab = 'screens' | 'doors' | 'objects' | 'bot' | 'room' | 'settings' | 'community';
+type Tab = 'screens' | 'doors' | 'objects' | 'bot' | 'room' | 'settings' | 'community' | 'generation' | 'inspector';
+
+const sourceFiles = [
+    'App.tsx',
+    'components/SceneCanvas.tsx',
+    'components/ScreenManager.tsx',
+    'components/MooseBot.tsx',
+    'api/chat-with-bot.js',
+    'api/generate-room.js',
+];
+
 
 const SliderInput: React.FC<{ label: string; value: number; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; min: number; max: number; step: number; displayValue?: string; className?: string;}> = ({ label, value, onChange, min, max, step, displayValue, className }) => (
     <div className={`flex flex-col ${className}`}>
@@ -33,18 +47,117 @@ const RemoveButton: React.FC<{onClick: () => void}> = ({onClick}) => (
     <button onClick={onClick} className="absolute top-2 right-2 text-gray-500 hover:text-red-500 font-bold text-lg leading-none p-1">&times;</button>
 )
 
-export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, sceneObjects, mooseBot, animationNames, roomConfig, onApply, onLoadConfiguration, onClose }) => {
+export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, sceneObjects, mooseBot, animationNames, roomConfig, apiKey, onApiKeyChange, onApply, onLoadConfiguration, onGenerateRoom, onCodeContextChange, onClose }) => {
   const [localScreens, setLocalScreens] = useState(screens);
   const [localDoors, setLocalDoors] = useState(doors);
   const [localObjects, setLocalObjects] = useState(sceneObjects);
   const [localBot, setLocalBot] = useState(mooseBot);
   const [localRoomConfig, setLocalRoomConfig] = useState(roomConfig);
-  const [activeTab, setActiveTab] = useState<Tab>('bot');
-  const [screenLayoutRadius, setScreenLayoutRadius] = useState(180);
-  const [doorLayoutRadius, setDoorLayoutRadius] = useState(220);
+  const [activeTab, setActiveTab] = useState<Tab>('room');
+  const [screenLayoutRadius, setScreenLayoutRadius] = useState(roomConfig.size * 0.72); // Dynamic radius based on room size
+  const [doorLayoutRadius, setDoorLayoutRadius] = useState(roomConfig.size * 0.88);   // Dynamic radius based on room size
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectUploadRef = useRef<HTMLInputElement>(null);
+  const [generationPrompt, setGenerationPrompt] = useState('A futuristic sci-fi library with glowing books.');
+  const [generatedConfig, setGeneratedConfig] = useState<any | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [generationStatus, setGenerationStatus] = useState<string | null>(null);
+  const [communityModels, setCommunityModels] = useState<{ url: string; description: string }[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(true);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [selectedCommunityModelUrl, setSelectedCommunityModelUrl] = useState('');
+  const [selectedSourceFile, setSelectedSourceFile] = useState<string>('');
+  const [primitiveToAdd, setPrimitiveToAdd] = useState<PrimitiveType>('box');
 
+  const handleAddScreen = () => {
+    const newScreen: ScreenState = {
+      id: `screen-${Date.now()}`,
+      isVisible: true,
+      url: 'https://en.wikipedia.org/wiki/Main_Page',
+      position: [0, -85, -screenLayoutRadius],
+      rotation: [0, Math.PI, 0],
+      scale: 1.6
+    };
+    setLocalScreens(prev => [...prev, newScreen]);
+  };
+
+  const handleAddDoor = () => {
+    const newDoor: DoorState = {
+      id: `door-${Date.now()}`,
+      name: 'New Portal',
+      url: 'https://github.com',
+      position: [0, -110, -doorLayoutRadius],
+      rotation: [0, Math.PI, 0],
+      scale: 1.4
+    };
+    setLocalDoors(prev => [...prev, newDoor]);
+  };
+  
+  const handleScreenChange = (id: string | number, field: keyof ScreenState, value: any) => {
+    setLocalScreens(prev => 
+      prev.map(screen => 
+        screen.id === id ? { ...screen, [field]: value } : screen
+      )
+    );
+  };
+  
+  const handleDoorChange = (id: string | number, field: keyof DoorState, value: any) => {
+    setLocalDoors(prev =>
+      prev.map(door =>
+        door.id === id ? { ...door, [field]: value } : door
+      )
+    );
+  };
+
+  // When a new config is loaded via props, sync the local state for the room and layout radii.
+  useEffect(() => {
+    setLocalRoomConfig(roomConfig);
+    setScreenLayoutRadius(roomConfig.size * 0.72);
+    setDoorLayoutRadius(roomConfig.size * 0.88);
+  }, [roomConfig]);
+
+  useEffect(() => {
+    const fetchModels = async () => {
+        try {
+            setModelsError(null);
+            const response = await fetch('/api/fetch-models');
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to fetch models: ${response.status} ${errorText}`);
+            }
+            const data = await response.json();
+            setCommunityModels(data);
+        } catch (error: any) {
+            console.error("Fetch models error:", error);
+            setModelsError(error.message);
+        } finally {
+            setIsLoadingModels(false);
+        }
+    };
+
+    fetchModels();
+  }, []); // Run once on component mount
+  
+  // Effect for the Code Inspector
+  useEffect(() => {
+    if (activeTab === 'inspector' && selectedSourceFile) {
+        const fetchFileContent = async () => {
+            try {
+                const response = await fetch(`/api/get-file-content?filePath=${encodeURIComponent(selectedSourceFile)}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch file content: ${await response.text()}`);
+                }
+                const data = await response.json();
+                onCodeContextChange(data.content, selectedSourceFile);
+            } catch (error: any) {
+                console.error("Error fetching file content:", error);
+                onCodeContextChange(`// Error loading ${selectedSourceFile}:\n// ${error.message}`, selectedSourceFile);
+            }
+        };
+        fetchFileContent();
+    }
+  }, [selectedSourceFile, activeTab, onCodeContextChange]);
 
   const handleApplyChanges = () => {
     onApply(localScreens, localDoors, localObjects, localBot, localRoomConfig);
@@ -79,14 +192,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, scen
 
   const handleSaveConfig = () => {
     try {
-        const config = {
+        const configToSave = generatedConfig ? generatedConfig : {
             screens: localScreens,
             doors: localDoors,
             sceneObjects: localObjects,
             mooseBot: localBot,
             room: localRoomConfig,
         };
-        const dataStr = JSON.stringify(config, null, 2);
+        const dataStr = JSON.stringify(configToSave, null, 2);
         const blob = new Blob([dataStr], {type: "application/json"});
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -123,8 +236,27 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, scen
     event.target.value = ''; // Reset file input
   };
   
-  const handleRoomChange = (field: keyof RoomConfig, value: any) => {
+  const handleRoomChange = (field: keyof Omit<RoomConfig, 'geometryConfig'>, value: any) => {
       setLocalRoomConfig(prev => ({ ...prev, [field]: value }));
+      // Also update the layout radii when the size slider is changed.
+      if (field === 'size') {
+        const numericValue = Number(value);
+        setScreenLayoutRadius(numericValue * 0.72);
+        setDoorLayoutRadius(numericValue * 0.88);
+      }
+  };
+
+  const handleGeometryChange = (shape: keyof GeometryConfig, field: string, value: number) => {
+    setLocalRoomConfig(prev => ({
+        ...prev,
+        geometryConfig: {
+            ...prev.geometryConfig,
+            [shape]: {
+                ...prev.geometryConfig[shape],
+                [field]: value,
+            }
+        }
+    }));
   };
     
   const handleBotChange = (field: keyof MooseBotState, value: any) => {
@@ -157,42 +289,89 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, scen
         setLocalDoors(newItems);
     }
   };
+  
+  const handleAddCommunityModel = () => {
+    if (!selectedCommunityModelUrl) return;
 
-  // Generic handlers for adding/removing items
-  const addItem = (type: Tab) => {
-    if (type === 'screens') {
-        const newItem = {
-            id: Date.now(),
-            position: [0, -100, -150] as [number, number, number],
-            rotation: [0, 0, 0] as [number, number, number],
-            scale: 1.5,
-            url: 'https://www.google.com', 
-            isVisible: true
-        };
-        setLocalScreens(prev => [...prev, newItem]);
+    const newObject: SceneObjectState = {
+        id: Date.now(),
+        url: selectedCommunityModelUrl,
+        type: 'model',
+        position: [0, -localRoomConfig.size / 2 + 5, -150],
+        rotation: [0, 0, 0],
+        scale: 10,
+    };
+    setLocalObjects(prev => [...prev, newObject]);
+    setSelectedCommunityModelUrl('');
+  };
+
+  const handleGenerateRoom = async () => {
+    if (!generationPrompt.trim()) {
+        setGenerationError('Please enter a theme or description for the room.');
+        return;
     }
-    if (type === 'doors') {
-        const newItem = {
-            id: Date.now(),
-            position: [0, -100, -150] as [number, number, number],
-            rotation: [0, 0, 0] as [number, number, number],
-            scale: 1.5,
-            url: '#', 
-            name: 'New Door'
-        };
-        setLocalDoors(prev => [...prev, newItem]);
+    setIsGenerating(true);
+    setGenerationError(null);
+    setGeneratedConfig(null);
+
+    try {
+        const generationParts = [
+            { key: 'room', label: 'Designing room colors and textures...' },
+            { key: 'screens', label: 'Placing virtual screens...' },
+            { key: 'doors', label: 'Hanging the doors...' },
+            { key: 'sceneObjects', label: 'Arranging decorative objects...' }
+        ];
+
+        let fullConfig: any = {};
+
+        for (const part of generationParts) {
+            setGenerationStatus(part.label);
+            const result = await onGenerateRoom(generationPrompt, part.key);
+            fullConfig = { ...fullConfig, ...result };
+        }
+        
+        setGenerationStatus("Finalizing scene...");
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        setGeneratedConfig(fullConfig);
+    } catch (error: any) {
+        setGenerationError(error.message || 'An unknown error occurred during generation.');
+    } finally {
+        setIsGenerating(false);
+        setGenerationStatus(null);
     }
-    if (type === 'objects') {
-        const newItem: SceneObjectState = {
-            id: Date.now(),
-            position: [0, -localRoomConfig.size / 2 + 15, -150] as [number, number, number],
-            rotation: [0, 0, 0] as [number, number, number],
-            scale: 15,
-            url: '/door.glb',
-            type: 'model',
-        };
-        setLocalObjects(prev => [...prev, newItem]);
+  };
+  
+  const handleAddPrimitive = () => {
+    let defaultParams;
+    switch(primitiveToAdd) {
+        case 'box':
+            defaultParams = { width: 10, height: 10, depth: 10 };
+            break;
+        case 'sphere':
+            defaultParams = { radius: 8, widthSegments: 32, heightSegments: 16 };
+            break;
+        case 'cylinder':
+            defaultParams = { radiusTop: 5, radiusBottom: 5, height: 20, radialSegments: 32 };
+            break;
+        default:
+            defaultParams = {};
     }
+
+    const newItem: SceneObjectState = {
+        id: `primitive-${Date.now()}`,
+        type: 'primitive',
+        primitiveType: primitiveToAdd,
+        primitiveParameters: defaultParams,
+        position: [
+            (Math.random() - 0.5) * 50,
+            -localRoomConfig.size / 2 + 15,
+            -150 + (Math.random() - 0.5) * 50
+        ],
+        rotation: [0, 0, 0],
+        scale: 1,
+    };
+    setLocalObjects(prev => [...prev, newItem]);
   };
   
   const removeItem = (type: Tab, id: number | string) => {
@@ -201,10 +380,23 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, scen
     if (type === 'objects') setLocalObjects(prev => prev.filter(o => o.id !== id));
   };
   
-  const handleItemChange = (type: Tab, id: number | string, field: string, value: any) => {
-    if (type === 'screens') setLocalScreens(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
-    if (type === 'doors') setLocalDoors(prev => prev.map(d => d.id === id ? { ...d, [field]: value } : d));
-    if (type === 'objects') setLocalObjects(prev => prev.map(o => o.id === id ? { ...o, [field]: value } : o));
+  const handleObjectChange = (id: number | string, field: string, value: any) => {
+    setLocalObjects(prev => prev.map(o => o.id === id ? { ...o, [field]: value } : o));
+  };
+  
+  const handlePrimitiveParamChange = (id: number | string, param: string, value: number) => {
+     setLocalObjects(prev => prev.map(o => {
+        if (o.id === id && o.type === 'primitive') {
+            return {
+                ...o,
+                primitiveParameters: {
+                    ...o.primitiveParameters,
+                    [param]: value,
+                }
+            };
+        }
+        return o;
+     }));
   };
 
 
@@ -228,159 +420,379 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, scen
 
   return (
     <div className="absolute inset-0 z-30 bg-black bg-opacity-70 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-cyan-500/50 rounded-lg shadow-2xl p-6 w-full max-w-4xl text-white font-mono flex flex-col h-full max-h-[90vh]">
-        <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-3">
+      <div className="bg-gray-900 border border-cyan-500/50 rounded-lg shadow-2xl p-6 w-full max-w-4xl text-white font-mono flex flex-col h-full max-h-[90vh] relative overflow-hidden">
+        <div className="flex justify-between items-center mb-4 border-b border-gray-700 pb-3 flex-shrink-0">
           <h2 className="text-2xl font-bold text-cyan-400">Nexus Control Panel</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-white text-3xl">&times;</button>
         </div>
         
-        <div className="flex border-b border-gray-700">
-            <TabButton tabId="bot">MOOSE-BOT</TabButton>
+        <div className="flex border-b border-gray-700 flex-shrink-0 overflow-x-auto">
+            <TabButton tabId="room">Room</TabButton>
             <TabButton tabId="screens">Screens</TabButton>
             <TabButton tabId="doors">Doors</TabButton>
             <TabButton tabId="objects">Objects</TabButton>
-            <TabButton tabId="room">Room</TabButton>
+            <TabButton tabId="bot">MOOSE-BOT</TabButton>
+            <TabButton tabId="generation">Universe</TabButton>
+            <TabButton tabId="inspector">Code Inspector</TabButton>
             <TabButton tabId="settings">Settings</TabButton>
-            <TabButton tabId="community">Community</TabButton>
         </div>
 
-        <div className="flex-grow overflow-y-auto pr-2 mt-4 space-y-4">
-          {activeTab === 'bot' && (
-            <div className="bg-gray-800 p-4 rounded-md border border-gray-700 space-y-4">
-                <h3 className="text-lg font-semibold text-cyan-300">MOOSE-BOT Configuration</h3>
-                <div className="flex items-center gap-4">
-                    <label className="text-sm text-gray-400 w-28">Model URL</label>
-                    <input type="text" placeholder="Bot Model URL (.glb)" value={localBot.url} onChange={e => handleBotChange('url', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"/>
+        <div className="flex-grow overflow-y-auto p-4 bg-gray-800 rounded-b-md">
+            {activeTab === 'bot' && (
+                <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-cyan-300">MOOSE-BOT Configuration</h3>
+                    <div>
+                        <label className="text-sm text-gray-400 mb-1 block">Model URL</label>
+                        <input type="text" value={localBot.url} onChange={e => handleBotChange('url', e.target.value)} className="w-full bg-gray-700 p-2 rounded-md" />
+                    </div>
+                     <div>
+                        <label className="text-sm text-gray-400 mb-1 block">Active Animation</label>
+                        <select value={localBot.activeAnimation} onChange={e => handleBotChange('activeAnimation', e.target.value)} className="w-full bg-gray-700 p-2 rounded-md">
+                            {animationNames.map(name => <option key={name} value={name}>{name}</option>)}
+                        </select>
+                    </div>
+                    {renderTransformControls(localBot, (field, value) => handleBotChange(field as keyof MooseBotState, value))}
                 </div>
-                 <div className="flex items-center gap-4">
-                    <label className="text-sm text-gray-400 w-28">Animation</label>
-                    <select value={localBot.activeAnimation} onChange={e => handleBotChange('activeAnimation', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500">
-                        {animationNames.map(name => <option key={name} value={name}>{name}</option>)}
-                         {animationNames.length === 0 && <option>Loading animations...</option>}
-                    </select>
+            )}
+
+            {activeTab === 'screens' && (
+                <div className="space-y-4">
+                     <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-semibold text-cyan-300">Screens</h3>
+                        <button onClick={handleAddScreen} className="bg-cyan-600 px-3 py-1 rounded-md text-sm">Add Screen</button>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <SliderInput label="Arrange Radius" value={screenLayoutRadius} onChange={e => setScreenLayoutRadius(Number(e.target.value))} min={50} max={300} step={1} className="flex-grow" />
+                        <button onClick={() => handleArrangeInCircle('screens')} className="bg-purple-600 px-3 py-1 rounded-md text-sm mt-5">Arrange in Circle</button>
+                    </div>
+                    {localScreens.map(s => (
+                        <div key={s.id} className="bg-gray-700/50 p-3 rounded-md relative">
+                            <RemoveButton onClick={() => removeItem('screens', s.id)} />
+                            <div className="flex items-center gap-4">
+                                <input type="text" placeholder="URL" value={s.url || ''} onChange={e => handleScreenChange(s.id, 'url', e.target.value)} className="w-full bg-gray-800 p-2 rounded-md" />
+                                <button onClick={() => handleScreenChange(s.id, 'isVisible', !s.isVisible)} className="text-cyan-400">
+                                    {s.isVisible ? <Eye /> : <EyeOff />}
+                                </button>
+                            </div>
+                            {renderTransformControls(s, (field, value) => handleScreenChange(s.id, field as keyof ScreenState, value))}
+                        </div>
+                    ))}
                 </div>
-                 <div className="flex items-start gap-4">
-                    <label className="text-sm text-gray-400 w-28 mt-1">Dialogue</label>
-                    <textarea placeholder="What the bot is thinking or saying..." value={localBot.dialogue} onChange={e => handleBotChange('dialogue', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" rows={2}/>
+            )}
+            
+            {activeTab === 'doors' && (
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-semibold text-cyan-300">Doors</h3>
+                        <button onClick={handleAddDoor} className="bg-cyan-600 px-3 py-1 rounded-md text-sm">Add Door</button>
+                    </div>
+                     <div className="flex items-center gap-4">
+                        <SliderInput label="Arrange Radius" value={doorLayoutRadius} onChange={e => setDoorLayoutRadius(Number(e.target.value))} min={50} max={300} step={1} className="flex-grow" />
+                        <button onClick={() => handleArrangeInCircle('doors')} className="bg-purple-600 px-3 py-1 rounded-md text-sm mt-5">Arrange in Circle</button>
+                    </div>
+                    {localDoors.map(d => (
+                         <div key={d.id} className="bg-gray-700/50 p-3 rounded-md relative">
+                            <RemoveButton onClick={() => removeItem('doors', d.id)} />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <input type="text" placeholder="Name" value={d.name} onChange={e => handleDoorChange(d.id, 'name', e.target.value)} className="w-full bg-gray-800 p-2 rounded-md" />
+                                <input type="text" placeholder="URL" value={d.url} onChange={e => handleDoorChange(d.id, 'url', e.target.value)} className="w-full bg-gray-800 p-2 rounded-md" />
+                            </div>
+                            {renderTransformControls(d, (field, value) => handleDoorChange(d.id, field as keyof DoorState, value))}
+                        </div>
+                    ))}
                 </div>
-                {renderTransformControls(localBot, (field, value) => handleBotChange(field as keyof MooseBotState, value))}
-            </div>
-          )}
-          {activeTab === 'screens' && localScreens.map(s => (
-            <div key={s.id} className="bg-gray-800 p-3 rounded-md border border-gray-700 relative">
-                <RemoveButton onClick={() => removeItem('screens', s.id)} />
-                <div className="flex items-center gap-4">
-                    <button onClick={() => handleItemChange('screens', s.id, 'isVisible', !s.isVisible)} className="p-2 text-cyan-400 hover:text-white">
-                    {s.isVisible ? <Eye /> : <EyeOff />}
+            )}
+
+            {activeTab === 'objects' && (
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-semibold text-cyan-300">Scene Objects</h3>
+                        <button onClick={() => objectUploadRef.current?.click()} className="bg-cyan-600 px-3 py-1 rounded-md text-sm">Upload GLB</button>
+                        <input type="file" ref={objectUploadRef} onChange={handleObjectUpload} accept=".glb" className="hidden" />
+                    </div>
+
+                    <div className="bg-gray-700/50 p-3 rounded-md mt-4">
+                        <h4 className="text-md font-semibold text-cyan-300 mb-2">Create Primitive</h4>
+                        <div className="flex items-center gap-2">
+                            <select value={primitiveToAdd} onChange={e => setPrimitiveToAdd(e.target.value as PrimitiveType)} className="w-full bg-gray-800 p-2 rounded-md">
+                                <option value="box">Box</option>
+                                <option value="sphere">Sphere</option>
+                                <option value="cylinder">Cylinder</option>
+                            </select>
+                            <button onClick={handleAddPrimitive} className="bg-purple-600 px-4 py-2 rounded-md text-sm">Add Primitive</button>
+                        </div>
+                    </div>
+
+                    {localObjects.map(o => (
+                        <div key={o.id} className="bg-gray-700/50 p-3 rounded-md relative">
+                            <RemoveButton onClick={() => removeItem('objects', o.id)} />
+                            {o.type === 'primitive' ? (
+                                <div>
+                                    <p className="text-md font-semibold text-cyan-300 capitalize">{o.primitiveType}</p>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-2">
+                                        {o.primitiveType === 'box' && o.primitiveParameters && (
+                                            <>
+                                                <SliderInput label="Width" value={o.primitiveParameters.width} onChange={e => handlePrimitiveParamChange(o.id, 'width', Number(e.target.value))} min={1} max={50} step={0.5} />
+                                                <SliderInput label="Height" value={o.primitiveParameters.height} onChange={e => handlePrimitiveParamChange(o.id, 'height', Number(e.target.value))} min={1} max={50} step={0.5} />
+                                                <SliderInput label="Depth" value={o.primitiveParameters.depth} onChange={e => handlePrimitiveParamChange(o.id, 'depth', Number(e.target.value))} min={1} max={50} step={0.5} />
+                                            </>
+                                        )}
+                                        {o.primitiveType === 'sphere' && o.primitiveParameters && (
+                                            <>
+                                                <SliderInput label="Radius" value={o.primitiveParameters.radius} onChange={e => handlePrimitiveParamChange(o.id, 'radius', Number(e.target.value))} min={1} max={30} step={0.5} />
+                                                <SliderInput label="Width Segments" value={o.primitiveParameters.widthSegments} onChange={e => handlePrimitiveParamChange(o.id, 'widthSegments', Number(e.target.value))} min={3} max={64} step={1} />
+                                                <SliderInput label="Height Segments" value={o.primitiveParameters.heightSegments} onChange={e => handlePrimitiveParamChange(o.id, 'heightSegments', Number(e.target.value))} min={2} max={32} step={1} />
+                                            </>
+                                        )}
+                                        {o.primitiveType === 'cylinder' && o.primitiveParameters && (
+                                            <>
+                                                <SliderInput label="Radius Top" value={o.primitiveParameters.radiusTop} onChange={e => handlePrimitiveParamChange(o.id, 'radiusTop', Number(e.target.value))} min={0.1} max={30} step={0.1} />
+                                                <SliderInput label="Radius Bottom" value={o.primitiveParameters.radiusBottom} onChange={e => handlePrimitiveParamChange(o.id, 'radiusBottom', Number(e.target.value))} min={0.1} max={30} step={0.1} />
+                                                <SliderInput label="Height" value={o.primitiveParameters.height} onChange={e => handlePrimitiveParamChange(o.id, 'height', Number(e.target.value))} min={1} max={50} step={0.5} />
+                                                <SliderInput label="Radial Segments" value={o.primitiveParameters.radialSegments} onChange={e => handlePrimitiveParamChange(o.id, 'radialSegments', Number(e.target.value))} min={3} max={64} step={1} />
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <input type="text" placeholder="Model URL" value={o.url || ''} onChange={e => handleObjectChange(o.id, 'url', e.target.value)} className="w-full bg-gray-800 p-2 rounded-md" />
+                                    <select value={o.type} onChange={e => handleObjectChange(o.id, 'type', e.target.value as SceneObjectType)} className="w-full bg-gray-800 p-2 rounded-md">
+                                        <option value="model">Model</option>
+                                        <option value="hologram">Hologram</option>
+                                    </select>
+                                </div>
+                            )}
+                            {renderTransformControls(o, (field, value) => handleObjectChange(o.id, field, value))}
+                        </div>
+                    ))}
+                </div>
+            )}
+            
+            {activeTab === 'room' && (
+                <div className="space-y-6">
+                    <h3 className="text-lg font-semibold text-cyan-300">Room Configuration</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label className="text-sm text-gray-400 mb-1 block">Room Shape</label>
+                            <select value={localRoomConfig.shape} onChange={e => handleRoomChange('shape', e.target.value)} className="w-full bg-gray-700 p-2 rounded-md">
+                                <option value="sphere">Sphere</option>
+                                <option value="box">Box</option>
+                                <option value="cylinder">Cylinder</option>
+                                <option value="cone">Cone</option>
+                                <option value="torus">Torus</option>
+                                <option value="icosahedron">Icosahedron</option>
+                                <option value="dodecahedron">Dodecahedron</option>
+                            </select>
+                        </div>
+                         <SliderInput label="Size" value={localRoomConfig.size} onChange={e => handleRoomChange('size', Number(e.target.value))} min={50} max={500} step={1} />
+                         <div className="flex items-center gap-4">
+                            <label className="text-sm text-gray-400">Wall Color</label>
+                            <input type="color" value={localRoomConfig.wallColor} onChange={e => handleRoomChange('wallColor', e.target.value)} className="bg-gray-700" />
+                        </div>
+                         <div className="flex items-center gap-4">
+                            <label className="text-sm text-gray-400">Floor Color</label>
+                            <input type="color" value={localRoomConfig.floorColor} onChange={e => handleRoomChange('floorColor', e.target.value)} className="bg-gray-700" />
+                        </div>
+                    </div>
+
+                    <div className="border-t border-gray-700/50 pt-4">
+                         <h4 className="text-md font-semibold text-cyan-300 mb-2">Geometry Details</h4>
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {localRoomConfig.shape === 'sphere' && (
+                                <>
+                                    <SliderInput label="Width Segments" value={localRoomConfig.geometryConfig.sphere.widthSegments} onChange={e => handleGeometryChange('sphere', 'widthSegments', Number(e.target.value))} min={3} max={128} step={1} />
+                                    <SliderInput label="Height Segments" value={localRoomConfig.geometryConfig.sphere.heightSegments} onChange={e => handleGeometryChange('sphere', 'heightSegments', Number(e.target.value))} min={2} max={128} step={1} />
+                                </>
+                            )}
+                            {localRoomConfig.shape === 'box' && (
+                                <>
+                                    <SliderInput label="Width Segments" value={localRoomConfig.geometryConfig.box.widthSegments} onChange={e => handleGeometryChange('box', 'widthSegments', Number(e.target.value))} min={1} max={64} step={1} />
+                                    <SliderInput label="Height Segments" value={localRoomConfig.geometryConfig.box.heightSegments} onChange={e => handleGeometryChange('box', 'heightSegments', Number(e.target.value))} min={1} max={64} step={1} />
+                                    <SliderInput label="Depth Segments" value={localRoomConfig.geometryConfig.box.depthSegments} onChange={e => handleGeometryChange('box', 'depthSegments', Number(e.target.value))} min={1} max={64} step={1} />
+                                </>
+                            )}
+                            {localRoomConfig.shape === 'cylinder' && (
+                                <>
+                                    <SliderInput label="Radial Segments" value={localRoomConfig.geometryConfig.cylinder.radialSegments} onChange={e => handleGeometryChange('cylinder', 'radialSegments', Number(e.target.value))} min={3} max={128} step={1} />
+                                    <SliderInput label="Height Segments" value={localRoomConfig.geometryConfig.cylinder.heightSegments} onChange={e => handleGeometryChange('cylinder', 'heightSegments', Number(e.target.value))} min={1} max={64} step={1} />
+                                </>
+                            )}
+                            {localRoomConfig.shape === 'cone' && (
+                                <>
+                                    <SliderInput label="Radial Segments" value={localRoomConfig.geometryConfig.cone.radialSegments} onChange={e => handleGeometryChange('cone', 'radialSegments', Number(e.target.value))} min={3} max={128} step={1} />
+                                    <SliderInput label="Height Segments" value={localRoomConfig.geometryConfig.cone.heightSegments} onChange={e => handleGeometryChange('cone', 'heightSegments', Number(e.target.value))} min={1} max={64} step={1} />
+                                </>
+                            )}
+                            {localRoomConfig.shape === 'torus' && (
+                                <>
+                                    <SliderInput label="Radial Segments" value={localRoomConfig.geometryConfig.torus.radialSegments} onChange={e => handleGeometryChange('torus', 'radialSegments', Number(e.target.value))} min={3} max={64} step={1} />
+                                    <SliderInput label="Tubular Segments" value={localRoomConfig.geometryConfig.torus.tubularSegments} onChange={e => handleGeometryChange('torus', 'tubularSegments', Number(e.target.value))} min={3} max={128} step={1} />
+                                </>
+                            )}
+                             {(localRoomConfig.shape === 'icosahedron' || localRoomConfig.shape === 'dodecahedron') && (
+                                <SliderInput label="Detail" value={localRoomConfig.geometryConfig[localRoomConfig.shape].detail} onChange={e => handleGeometryChange(localRoomConfig.shape, 'detail', Number(e.target.value))} min={0} max={5} step={1} />
+                            )}
+                         </div>
+                    </div>
+                    
+                    <div className="border-t border-gray-700/50 pt-4">
+                         <h4 className="text-md font-semibold text-cyan-300 mb-2">Lighting</h4>
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <SliderInput label="Ambient Light Intensity" value={localRoomConfig.ambientLightIntensity} onChange={e => handleRoomChange('ambientLightIntensity', Number(e.target.value))} min={0} max={10} step={0.1} />
+                            <SliderInput label="Central Point Light Intensity" value={localRoomConfig.pointLightIntensity} onChange={e => handleRoomChange('pointLightIntensity', Number(e.target.value))} min={0} max={50} step={0.5} />
+                             <div className="flex items-center gap-4">
+                                <label className="text-sm text-gray-400">Point Light Color</label>
+                                <input type="color" value={localRoomConfig.pointLightColor} onChange={e => handleRoomChange('pointLightColor', e.target.value)} className="bg-gray-700" />
+                            </div>
+                         </div>
+                    </div>
+
+                     <div className="border-t border-gray-700/50 pt-4">
+                         <h4 className="text-md font-semibold text-cyan-300 mb-2">Atmosphere</h4>
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <SliderInput label="Fog Density" value={localRoomConfig.fogDensity} onChange={e => handleRoomChange('fogDensity', Number(e.target.value))} min={0} max={100} step={1} />
+                             <div className="flex items-center gap-4">
+                                <label className="text-sm text-gray-400">Fog Color</label>
+                                <input type="color" value={localRoomConfig.fogColor} onChange={e => handleRoomChange('fogColor', e.target.value)} className="bg-gray-700" />
+                            </div>
+                         </div>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'generation' && (
+                <div className="space-y-6 relative">
+                    {isGenerating && (
+                        <div className="absolute inset-0 bg-gray-900/95 flex flex-col items-center justify-center z-10 rounded-lg -m-4">
+                            <div className="text-cyan-400 text-lg mb-4 font-semibold">{generationStatus || 'Starting up...'}</div>
+                            <div className="w-3/4 h-2 bg-gray-700 rounded-full overflow-hidden">
+                                <div className="h-full bg-cyan-500 rounded-full animate-pulse"></div>
+                            </div>
+                            <p className="text-gray-400 text-sm mt-4">AI is building your world. This can take up to a minute.</p>
+                        </div>
+                    )}
+                    <div>
+                      <h3 className="text-lg font-semibold text-cyan-300">Universe Generation</h3>
+                      <p className="text-sm text-gray-400 mt-1">Describe a theme, and let AI build a complete universe configuration for you.</p>
+                       <div className="mt-4">
+                           <label className="text-sm text-gray-400 mb-1 block">Gemini API Key</label>
+                           <input
+                               type="password"
+                               value={apiKey}
+                               onChange={(e) => onApiKeyChange(e.target.value)}
+                               placeholder="Enter your key to enable generation..."
+                               className="bg-gray-800 border border-gray-600 rounded-md px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 w-full"
+                               autoComplete="off"
+                           />
+                       </div>
+                    </div>
+                    <div>
+                        <label className="text-sm text-gray-400 mb-1 block">Theme Prompt</label>
+                        <textarea
+                            value={generationPrompt}
+                            onChange={(e) => setGenerationPrompt(e.target.value)}
+                            placeholder="e.g., An ancient, overgrown elven library."
+                            className="w-full h-24 bg-gray-800 border border-gray-600 rounded-md p-2"
+                        />
+                    </div>
+                    <button onClick={handleGenerateRoom} disabled={isGenerating || !apiKey} className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:opacity-50">
+                        {isGenerating ? 'Generating...' : 'Generate Universe'}
                     </button>
-                    <input type="text" value={s.url} onChange={e => handleItemChange('screens', s.id, 'url', e.target.value)} className="flex-grow bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"/>
-                </div>
-                {renderTransformControls(s, (field, value) => handleItemChange('screens', s.id, field, value))}
-            </div>
-          ))}
-          {activeTab === 'doors' && localDoors.map(d => (
-             <div key={d.id} className="bg-gray-800 p-3 rounded-md border border-gray-700 relative">
-                <RemoveButton onClick={() => removeItem('doors', d.id)} />
-                <div className="grid grid-cols-2 gap-4">
-                    <input type="text" placeholder="Name" value={d.name} onChange={e => handleItemChange('doors', d.id, 'name', e.target.value)} className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"/>
-                    <input type="text" placeholder="URL" value={d.url} onChange={e => handleItemChange('doors', d.id, 'url', e.target.value)} className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"/>
-                </div>
-                {renderTransformControls(d, (field, value) => handleItemChange('doors', d.id, field, value))}
-             </div>
-          ))}
-          {activeTab === 'objects' && localObjects.map(o => (
-             <div key={o.id} className="bg-gray-800 p-3 rounded-md border border-gray-700 relative">
-                <RemoveButton onClick={() => removeItem('objects', o.id)} />
-                <div className="flex items-center gap-4 mb-2">
-                    <select value={o.type} onChange={e => handleItemChange('objects', o.id, 'type', e.target.value)} className="bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500">
-                        <option value="model">3D Model</option>
-                        <option value="hologram">Scene Hologram</option>
-                    </select>
-                    <input type="text" placeholder={o.type === 'model' ? "Model URL (.glb) or Data URL" : "Scene Config URL (.json)"} value={o.url} onChange={e => handleItemChange('objects', o.id, 'url', e.target.value)} className="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"/>
-                </div>
-                {renderTransformControls(o, (field, value) => handleItemChange('objects', o.id, field, value))}
-             </div>
-          ))}
-          {activeTab === 'room' && (
-            <div className="bg-gray-800 p-4 rounded-md border border-gray-700 space-y-4">
-                <h3 className="text-lg font-semibold text-cyan-300">Environment Settings</h3>
-                <p className="text-sm text-gray-400">Customize the appearance of the main chamber.</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                    <SliderInput label="Room Size" value={localRoomConfig.size} onChange={e => handleRoomChange('size', Number(e.target.value))} min={50} max={500} step={1} className="md:col-span-2" />
-                    <div className="flex flex-col">
-                        <label className="text-sm text-gray-400 mb-1">Wall Color</label>
-                        <input type="color" value={localRoomConfig.wallColor} onChange={e => handleRoomChange('wallColor', e.target.value)} className="w-full h-10 p-1 bg-gray-700 border border-gray-600 rounded cursor-pointer" />
+                    {generationError && <p className="text-red-400 text-sm text-center">{generationError}</p>}
+                    
+                    <div className="border-t border-cyan-500/30 pt-4 mt-4 space-y-3">
+                        <h4 className="text-md font-semibold text-cyan-300">Community Models</h4>
+                        <p className="text-sm text-gray-400">Or, add a single model from the community to your scene.</p>
+                        
+                        {isLoadingModels && <p className="text-gray-400">Loading models...</p>}
+                        {modelsError && <p className="text-red-400 text-sm">Error: {modelsError}</p>}
+                        
+                        {!isLoadingModels && !modelsError && (
+                            <div className="flex items-center gap-2">
+                                <select
+                                    value={selectedCommunityModelUrl}
+                                    onChange={(e) => setSelectedCommunityModelUrl(e.target.value)}
+                                    className="w-full bg-gray-800 border border-gray-600 rounded-md p-2 text-sm flex-grow"
+                                    aria-label="Select a community model"
+                                >
+                                    <option value="">-- Select a model from public Gists --</option>
+                                    {communityModels.map((model, index) => (
+                                        <option key={`${model.url}-${index}`} value={model.url}>
+                                            {model.description || `Community Model #${index + 1}`}
+                                        </option>
+                                    ))}
+                                </select>
+                                <button 
+                                    onClick={handleAddCommunityModel} 
+                                    disabled={!selectedCommunityModelUrl}
+                                    className="bg-cyan-600 hover:bg-cyan-500 px-3 py-2 rounded-md text-sm text-white font-semibold disabled:opacity-50 flex-shrink-0"
+                                >
+                                    Add to Scene
+                                </button>
+                            </div>
+                        )}
                     </div>
-                    <div className="flex flex-col">
-                        <label className="text-sm text-gray-400 mb-1">Floor Color</label>
-                        <input type="color" value={localRoomConfig.floorColor} onChange={e => handleRoomChange('floorColor', e.target.value)} className="w-full h-10 p-1 bg-gray-700 border border-gray-600 rounded cursor-pointer" />
-                    </div>
+
+                    {generatedConfig && (
+                        <div className="border-t border-cyan-500/30 pt-4 mt-4 space-y-3">
+                            <h4 className="text-md font-semibold text-cyan-300">Generation Complete!</h4>
+                            <p className="text-sm text-gray-300">A new configuration has been created based on your prompt. You can now save it or apply it to the scene.</p>
+                             <div className="flex gap-4">
+                                <button onClick={() => onLoadConfiguration(generatedConfig)} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-4 rounded-md transition-colors">
+                                    Load Generated Scene
+                                </button>
+                                <button onClick={handleSaveConfig} className="flex-1 bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition-colors">
+                                    Save to File
+                                </button>
+                             </div>
+                        </div>
+                    )}
                 </div>
-            </div>
-          )}
-          {activeTab === 'settings' && (
-            <div className="space-y-6">
-                <div className="bg-gray-800 p-4 rounded-md border border-gray-700 space-y-4">
-                    <h3 className="text-lg font-semibold text-cyan-300">Configuration Management</h3>
-                    <p className="text-sm text-gray-400">Save your current scene layout to a file, or load a previously saved layout.</p>
+            )}
+            
+            {activeTab === 'inspector' && (
+                <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-cyan-300">Code Inspector</h3>
+                    <p className="text-sm text-gray-400">
+                        Select a source file to view its content on the main screen and ask MOOSE-BOT questions about it.
+                    </p>
+                    <div>
+                        <label htmlFor="source-file-select" className="text-sm text-gray-400 mb-1 block">Select Source File</label>
+                        <select
+                            id="source-file-select"
+                            value={selectedSourceFile}
+                            onChange={e => setSelectedSourceFile(e.target.value)}
+                            className="w-full bg-gray-700 p-2 rounded-md"
+                        >
+                            <option value="" disabled>-- Choose a file --</option>
+                            {sourceFiles.map(file => (
+                                <option key={file} value={file}>{file}</option>
+                            ))}
+                        </select>
+                    </div>
+                     <p className="text-xs text-gray-500 mt-2">
+                        After selecting a file, try asking MOOSE-BOT: "What does this code do?" or "Explain the 'Room' component in this file."
+                    </p>
+                </div>
+            )}
+
+            {activeTab === 'settings' && (
+                <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-cyan-300">Manage Configuration</h3>
                     <div className="flex gap-4">
-                        <button onClick={handleSaveConfig} className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md transition-colors">Save to File</button>
-                        <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md transition-colors">Load from File</button>
-                        <input type="file" ref={fileInputRef} onChange={handleFileLoad} accept=".json" className="hidden"/>
+                        <button onClick={handleSaveConfig} className="flex-1 bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md transition-colors">Save to File</button>
+                        <button onClick={() => fileInputRef.current?.click()} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-4 rounded-md transition-colors">Load from File</button>
+                        <input type="file" ref={fileInputRef} onChange={handleFileLoad} accept=".json" className="hidden" />
                     </div>
                 </div>
-                 <div className="bg-gray-800 p-4 rounded-md border border-gray-700 space-y-2">
-                    <h3 className="text-lg font-semibold text-cyan-300">Layout Tools</h3>
-                    <p className="text-sm text-gray-400">Automatically arrange items in a circular pattern.</p>
-                    <div className="flex items-center gap-4 p-3 border-t border-gray-700/50 mt-2">
-                        <span className="font-semibold text-gray-300 w-20">Screens</span>
-                        <SliderInput label="Radius" value={screenLayoutRadius} onChange={e => setScreenLayoutRadius(Number(e.target.value))} min={10} max={400} step={1} className="flex-grow"/>
-                        <button onClick={() => handleArrangeInCircle('screens')} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-colors">Arrange</button>
-                    </div>
-                    <div className="flex items-center gap-4 p-3 border-t border-gray-700/50">
-                        <span className="font-semibold text-gray-300 w-20">Doors</span>
-                        <SliderInput label="Radius" value={doorLayoutRadius} onChange={e => setDoorLayoutRadius(Number(e.target.value))} min={10} max={400} step={1} className="flex-grow"/>
-                        <button onClick={() => handleArrangeInCircle('doors')} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-colors">Arrange</button>
-                    </div>
-                </div>
-            </div>
-          )}
-           {activeTab === 'community' && (
-            <div className="bg-gray-800 p-4 rounded-md border border-gray-700 space-y-4 text-gray-300">
-                <h3 className="text-lg font-semibold text-cyan-300">Welcome to MOOSE!</h3>
-                <p className="text-sm">MOOSE stands for My Ontological Operating System Environment. The vision is to create a decentralized network of interconnected 3D web spaces—a "MOOSE-NET".</p>
-                <p className="text-sm">You can be a part of this by forking this project, customizing your own MOOSE page, and deploying it for others to visit.</p>
-                <div className="pt-2">
-                    <a href="https://github.com/zakdegarmo/web-dungeon.git" target="_blank" rel="noopener noreferrer" className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md transition-colors inline-block">
-                        Fork on GitHub
-                    </a>
-                </div>
-                 <div className="pt-4 border-t border-gray-700/50 mt-4">
-                    <h4 className="font-semibold text-cyan-300">Tip: Loading Models from GitHub</h4>
-                    <p className="text-sm mt-1">To load a `.glb` or `.gltf` file from GitHub, find the file in the repository, click the <span className="font-bold text-white">"Raw"</span> button, and use that URL. The URL should start with `raw.githubusercontent.com`.</p>
-                </div>
-            </div>
-          )}
+            )}
         </div>
         
-        <div className="mt-6 flex justify-between items-center pt-4 border-t border-gray-700">
-            <div className="flex gap-2">
-                {activeTab === 'screens' && <button onClick={() => addItem('screens')} className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition-colors text-sm">+ Add Screen</button>}
-                {activeTab === 'doors' && <button onClick={() => addItem('doors')} className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition-colors text-sm">+ Add Door</button>}
-                {activeTab === 'objects' && (
-                    <>
-                        <button onClick={() => addItem('objects')} className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition-colors text-sm">+ Add Object</button>
-                        <button onClick={() => objectUploadRef.current?.click()} className="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-md transition-colors text-sm">+ Upload Model</button>
-                        <input type="file" ref={objectUploadRef} onChange={handleObjectUpload} accept=".glb,.gltf" className="hidden"/>
-                    </>
-                )}
-            </div>
-            <button
-                onClick={handleApplyChanges}
-                className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-4 rounded-md transition-colors"
-            >
-                Apply & Close
-            </button>
+        <div className="flex justify-end pt-4 border-t border-gray-700 flex-shrink-0">
+          <button onClick={handleApplyChanges} className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-6 rounded-md transition-colors">
+            Apply Changes
+          </button>
         </div>
       </div>
     </div>

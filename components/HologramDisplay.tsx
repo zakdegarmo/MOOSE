@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, Suspense } from 'react';
 import * as THREE from 'three';
 import type { ThreeElements } from '@react-three/fiber';
@@ -8,7 +6,7 @@ import Door from './Doors';
 import { SceneObject } from './DecorativeObject'; 
 import type { ScreenState, DoorState, SceneObjectState, RoomConfig } from '../App';
 
-// FIX: Manually extend JSX.IntrinsicElements to include React Three Fiber's elements.
+// Manually extend JSX.IntrinsicElements to include React Three Fiber's elements.
 // This is a workaround for environments where TypeScript's module augmentation may not be working correctly.
 declare global {
   namespace JSX {
@@ -123,7 +121,8 @@ export const HologramDisplay: React.FC<HologramDisplayProps> = ({ url, ...props 
                     screen.isVisible && (
                         <Screen
                             key={`hologram-screen-${screen.id}`}
-                            url={screen.url}
+                            // FIX: The Screen component requires an 'id' prop.
+                            id={screen.id}
                             position={screen.position}
                             rotation={screen.rotation}
                             scale={screen.scale}

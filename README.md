@@ -1,3 +1,4 @@
+
 # MOOSE - My Ontological Operating System Environment
 
 This project is an immersive 3D scene that displays web pages on virtual screens, featuring an AI assistant, MOOSE-BOT.
@@ -35,19 +36,7 @@ Navigate to your project's root directory in the terminal and link it to your Ve
 vercel link
 ```
 
-### Step 4: Set Up Environment Variables
-
-The AI chat bot requires a Gemini API key. Create a file named `.env.local` in the root of your project. **This file should not be committed to version control.**
-
-Inside `.env.local`, add your API key:
-
-```
-API_KEY="YOUR_GEMINI_API_KEY_HERE"
-```
-
-The Vercel CLI will automatically load this variable when you run the dev server. The frontend will ask for this key in the UI, which is then sent to the backend function.
-
-### Step 5: Run the Development Server
+### Step 4: Run the Development Server
 
 Start the local server with the following command:
 
@@ -55,7 +44,14 @@ Start the local server with the following command:
 vercel dev
 ```
 
-This will start a server (usually on `http://localhost:3000`) that serves your React application and also runs your serverless functions from the `/api` directory. Your `fetch('/api/chat-with-bot')` calls will now work correctly.
+This will start a server (usually on `http://localhost:3000`) that serves your React application and also runs your serverless functions from the `/api` directory.
+
+## Using AI Features (MOOSE-BOT & Universe Generation)
+
+To enable the AI-powered features, you need to provide your own Google Gemini API key.
+
+1.  **Get a Gemini API Key:** Visit [Google AI Studio](https://aistudio.google.com/app/apikey) to create your API key.
+2.  **Enter the Key in the App:** Once you have your key, paste it into the "Enter Gemini API Key..." input field at the bottom of the MOOSE application screen. The key is stored locally in your browser and is required for all AI interactions.
 
 ## Deployment
 
@@ -64,5 +60,3 @@ To deploy your project to Vercel, simply run:
 ```bash
 vercel --prod
 ```
-
-Make sure to set your `API_KEY` as an environment variable in your Vercel project settings on their website.

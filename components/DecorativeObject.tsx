@@ -1,11 +1,13 @@
-import React, { Suspense, useEffect, useRef } from 'react';
+
+import React, { Suspense, useEffect, useRef, forwardRef } from 'react';
 import * as THREE from 'three';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import type { ThreeElements } from '@react-three/fiber';
 import { HologramDisplay } from './HologramDisplay';
 import type { SceneObjectState } from '../App';
+import { Primitive } from './Primitive';
 
-// FIX: Manually extend JSX.IntrinsicElements to include React Three Fiber's elements.
+// Manually extend JSX.IntrinsicElements to include React Three Fiber's elements.
 // This is a workaround for environments where TypeScript's module augmentation may not be working correctly.
 declare global {
   namespace JSX {
@@ -16,7 +18,9 @@ declare global {
 
 // This sub-component handles the actual model loading and animation.
 // It's designed to be wrapped in a Suspense boundary.
-const Model: React.FC<Omit<SceneObjectState, 'type' | 'id'> & ThreeElements['group']> = ({ url, ...props }) => {
+// FIX: The prop types for Model incorrectly required transform properties, which are handled by the parent SceneObject.
+// The type has been corrected to make these properties optional, resolving the type error at the call site.
+const Model: React.FC<{ url: string } & ThreeElements['group']> = ({ url, ...props }) => {
     // Correct the MIME type for data URLs if necessary.
     let correctedUrl = url;
     if (url && url.startsWith('data:application/octet-stream')) {
@@ -69,27 +73,32 @@ const Model: React.FC<Omit<SceneObjectState, 'type' | 'id'> & ThreeElements['gro
 }
 
 
-// FIX: Destructure `id` and `url` from props to prevent them from being passed down to underlying R3F components, which causes prop type conflicts.
+// Destructure `id` and `url` from props to prevent them from being passed down to underlying R3F components, which causes prop type conflicts.
 // The `id` from `SceneObjectState` is for React keys and state management, not for Three.js objects.
 // `url` is a custom prop for this component and should be passed explicitly to child components that need it.
-// FIX: Omit `id` from `ThreeElements['group']` to resolve the type conflict where `SceneObjectState['id']` can be a string but the R3F `id` prop must be a number.
-export const SceneObject: React.FC<SceneObjectState & Omit<ThreeElements['group'], 'id'>> = ({ type, id, url, ...props }) => {
+// Omit `id` from `ThreeElements['group']` to resolve the type conflict where `SceneObjectState['id']` can be a string but the R3F `id` prop must be a number.
+export const SceneObject = forwardRef<THREE.Group, SceneObjectState & Omit<ThreeElements['group'], 'id'>>(({ type, id, url, primitiveType, primitiveParameters, ...props }, ref) => {
   // The fallback renders a red box if the model fails to load.
   // This Suspense boundary catches errors during model loading.
   return (
-    <Suspense fallback={
-        <group {...props}>
-            <mesh>
-                <boxGeometry args={[10, 10, 10]} />
-                <meshStandardMaterial color="red" />
-            </mesh>
-        </group>
-    }>
-        {type === 'hologram' ? (
-            <HologramDisplay url={url} {...props} />
-        ) : (
-            <Model url={url} {...props} />
-        )}
-    </Suspense>
+    <group ref={ref} {...props}>
+        <Suspense fallback={
+            <group {...props}>
+                <mesh>
+                    <boxGeometry args={[10, 10, 10]} />
+                    <meshStandardMaterial color="red" />
+                </mesh>
+            </group>
+        }>
+            {type === 'primitive' && primitiveType && primitiveParameters ? (
+                <Primitive primitiveType={primitiveType} parameters={primitiveParameters} />
+            ) : type === 'hologram' && url ? (
+                <HologramDisplay url={url} />
+            ) : url ? (
+                <Model url={url} />
+            ) : null}
+        </Suspense>
+    </group>
   );
-};
+});
+SceneObject.displayName = 'SceneObject';

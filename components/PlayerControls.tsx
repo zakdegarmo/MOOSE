@@ -1,5 +1,6 @@
 
 
+
 import React, { useEffect, useRef, useMemo } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -90,8 +91,8 @@ export const PlayerControls = ({ initialPosition, speed = 0.5, rotationSpeed = 0
 
         if (keys['w']) pivot.current.position.addScaledVector(direction, currentSpeed);
         if (keys['s']) pivot.current.position.addScaledVector(direction, -currentSpeed);
-        if (keys['a']) pivot.current.position.addScaledVector(rightVector, -currentSpeed);
-        if (keys['d']) pivot.current.position.addScaledVector(rightVector, currentSpeed);
+        if (keys['a']) pivot.current.position.addScaledVector(rightVector, currentSpeed);
+        if (keys['d']) pivot.current.position.addScaledVector(rightVector, -currentSpeed);
 
         if (keys['q']) pivot.current.rotation.y += rotationSpeed;
         if (keys['e']) pivot.current.rotation.y -= rotationSpeed;
