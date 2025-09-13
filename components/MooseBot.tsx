@@ -1,4 +1,5 @@
-
+// FIX: Add reference to react-three/fiber types to ensure JSX elements are recognized.
+/// <reference types="@react-three/fiber" />
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useGLTF, useAnimations, Html } from '@react-three/drei';
@@ -99,4 +100,4 @@ export const MooseBot: React.FC<MooseBotProps> = ({ url, dialogue, activeAnimati
 }
 
 // Preload the default model for faster initial load
-useGLTF.preload('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb');
+useGLTF.preload('/moose-bot.glb');

@@ -110,7 +110,24 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, scen
     );
   };
 
-  // When a new config is loaded via props, sync the local state for the room and layout radii.
+  // When a new config is loaded via props, or props change from outside (e.g. 3D transforms),
+  // sync the local state to ensure the control panel has the latest data.
+  useEffect(() => {
+    setLocalScreens(screens);
+  }, [screens]);
+  
+  useEffect(() => {
+    setLocalDoors(doors);
+  }, [doors]);
+  
+  useEffect(() => {
+    setLocalObjects(sceneObjects);
+  }, [sceneObjects]);
+
+  useEffect(() => {
+    setLocalBot(mooseBot);
+  }, [mooseBot]);
+
   useEffect(() => {
     setLocalRoomConfig(roomConfig);
     setScreenLayoutRadius(roomConfig.size * 0.72);
@@ -268,10 +285,11 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, scen
         const count = localScreens.length;
         if (count === 0) return;
         const newItems = localScreens.map((item, index) => {
-            const angle = (index / count) * Math.PI * 2;
+            const angle = (index / count) * Math.PI * 2 + Math.PI; // Offset start position by 180deg
             const x = Math.cos(angle) * screenLayoutRadius;
             const z = Math.sin(angle) * screenLayoutRadius;
-            const rotationY = -angle + Math.PI / 2;
+            // Corrected rotation to face inwards towards the center by adding 180 degrees (PI radians).
+            const rotationY = -angle + Math.PI / 2 + Math.PI;
             return { ...item, position: [x, item.position[1], z] as [number,number,number], rotation: [item.rotation[0], rotationY, item.rotation[2]] as [number,number,number] };
         });
         setLocalScreens(newItems);
@@ -280,9 +298,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ screens, doors, scen
         const count = localDoors.length;
         if (count === 0) return;
         const newItems = localDoors.map((item, index) => {
-            const angle = (index / count) * Math.PI * 2;
+            const angle = (index / count) * Math.PI * 2 + Math.PI; // Offset start position by 180deg
             const x = Math.cos(angle) * doorLayoutRadius;
             const z = Math.sin(angle) * doorLayoutRadius;
+            // The original rotation formula for doors should correctly face them inwards.
             const rotationY = -angle + Math.PI / 2;
             return { ...item, position: [x, item.position[1], z] as [number,number,number], rotation: [item.rotation[0], rotationY, item.rotation[2]] as [number,number,number] };
         });
