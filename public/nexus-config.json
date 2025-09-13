@@ -159,6 +159,22 @@
         0
       ],
       "scale": 3
+    },
+    {
+      "id": "screen-1757751127474",
+      "isVisible": true,
+      "url": "../background_video.mp4",
+      "position": [
+        0,
+        -50,
+        0
+      ],
+      "rotation": [
+        0,
+        3.141592653589793,
+        0
+      ],
+      "scale": 5
     }
   ],
   "doors": [
